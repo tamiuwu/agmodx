@@ -18,6 +18,7 @@
 	Contact: usertxa@gmail.com
 */
 
+#include <agmodx>
 #include <amxmisc>
 #include <amxmodx>
 #include <engine>
@@ -209,7 +210,8 @@ new gVoteCallerUserId;
 new gVoteTargetUserId;
 new gVoteArg1[32];
 new gVoteArg2[32];
-new gVoteOption;
+new gVoteOptionFwHandle;
+new gNumVoteArgs;
 
 // array size of some gamemode cvars
 #define SIZE_WEAPONS 14 
@@ -444,6 +446,12 @@ public plugin_precache() {
 
 	server_cmd("exec gamemodes/%s.cfg", mode);
 	server_exec();
+}
+
+public plugin_natives() {
+	register_native("ag_vote_add", "native_ag_vote_add");
+	register_native("ag_vote_remove", "native_ag_vote_remove");
+	register_native("ag_vote_exists", "native_ag_vote_exists");
 }
 
 public plugin_init() {
@@ -1779,8 +1787,27 @@ stock PrintUserInfo(caller, target) {
 CreateVoteSystem() {
 	gTrieVoteList = TrieCreate();
 
-	for (new i; i < sizeof gVoteList; i++)
-		TrieSetCell(gTrieVoteList, gVoteList[i], i);
+	ag_vote_add("agabort", "OnVoteAgAbort");
+	ag_vote_add("agallow", "OnVoteAgAllow");
+	ag_vote_add("agnextmap", "OnVoteNextMap");
+	ag_vote_add("agnextmode", "OnVoteNextMode");
+	ag_vote_add("agpause", "OnVoteAgPause");
+	ag_vote_add("agstart", "OnVoteAgStart");
+	ag_vote_add("map", "OnVoteAgMap");
+	ag_vote_add("mp_bunnyhop", "OnVoteBunnyHop");
+	ag_vote_add("mp_falldamage", "OnVoteFallDamage");
+	ag_vote_add("mp_flashlight", "OnVoteFlashLight");
+	ag_vote_add("mp_footsteps", "OnVoteFootSteps");
+	ag_vote_add("mp_forcerespawn", "OnVoteForceRespawn");
+	ag_vote_add("mp_fraglimit", "OnVoteFragLimit");
+	ag_vote_add("mp_friendlyfire", "OnVoteFriendlyFire");
+	ag_vote_add("mp_selfgauss", "OnVoteSelfGauss");
+	ag_vote_add("mp_timelimit", "OnVoteTimeLimit");
+	ag_vote_add("mp_weaponstay", "OnVoteWeaponStay");
+
+	ag_vote_add("ag_oldphysics", "OnVoteBunnyHop");
+	ag_vote_add("agmap", "OnVoteAgMap");
+	ag_vote_add("ag_gauss_fix", "OnVoteSelfGauss");
 }
 
 LoadGameMode() {
@@ -1849,7 +1876,8 @@ public CmdVote(id) {
 		return PLUGIN_HANDLED;
 
 	// Print help on console
-	if (read_argc() == 1) {
+	new argc = read_argc();
+	if (argc == 1) {
 		VoteHelp(id);
 		return PLUGIN_HANDLED;
 	}
@@ -1870,28 +1898,38 @@ public CmdVote(id) {
 	read_argv(1, arg1, charsmax(arg1));
 	read_argv(2, arg2, charsmax(arg2));
 
-	gVoteOption = GetUserVote(id, arg1, arg2, charsmax(arg2));
+	gVoteCallerUserId = get_user_userid(id);
+	gNumVoteArgs = argc - 1;
+
+	// Vote doesn't exists
+	if (!TrieGetCell(gTrieVoteList, arg1, gVoteOptionFwHandle)) {
+		client_print(id, print_console, "%l", "VOTE_NOTFOUND");
+		return PLUGIN_HANDLED;
+	}
 	
-	if (gVoteOption == VOTE_INVALID) // invalid vote
+	new voteResult;
+	ExecuteForward(gVoteOptionFwHandle, voteResult, gVoteCallerUserId, true, gNumVoteArgs, arg1, arg2);
+
+	if (voteResult == PLUGIN_HANDLED)
 		return PLUGIN_HANDLED;
 
 	gVoteArg1 = arg1;
 	gVoteArg2 = arg2;
 
-	gVoteStarted = true;
-
 	gVotePlayers[id] = VOTE_YES;
-	gVoteCallerUserId = get_user_userid(id);
 
 	get_user_name(id, gVoteCallerName, charsmax(gVoteCallerName));
-	
+
+	gVoteStarted = true;
+
 	// cancel vote after x seconds (set_task doesnt work in pause)
 	set_task(get_pcvar_float(gCvarVoteDuration), "DenyVote", TASK_DENYVOTE); 
-
+	
 	// show vote
 	ShowVote();
 
-	return PLUGIN_HANDLED;
+
+	return PLUGIN_CONTINUE;
 }
 
 public ShowVote() {
@@ -1941,7 +1979,8 @@ public DoVote() {
 	if (!caller)
 		return;
 
-	switch (gVoteOption) {
+	ExecuteForward(gVoteOptionFwHandle, _, gVoteCallerUserId, false, gNumVoteArgs, gVoteArg1, gVoteArg2);
+	/*switch (gVoteOption) {
 		case VOTE_AGABORT: 			AbortVersus();
 		case VOTE_AGALLOW: 			AllowPlayer(target);
 		case VOTE_AGNEXTMAP:		set_pcvar_string(gCvarAmxNextMap, gVoteArg2);
@@ -1960,7 +1999,7 @@ public DoVote() {
 		case VOTE_MP_TIMELIMIT:		set_pcvar_string(gCvarTimeLimit, gVoteArg2);
 		case VOTE_MP_FRAGLIMIT: 	set_pcvar_string(gCvarFragLimit, gVoteArg2);
 		case VOTE_MP_WEAPONSTAY:	set_pcvar_string(gCvarWeaponStay, gVoteArg2);
-	}
+	}*/
 }
 
 public DenyVote() {
@@ -1990,6 +2029,87 @@ public RemoveVote() {
 	// reset user votes
 	arrayset(gVotePlayers, 0, sizeof gVotePlayers);
 }
+
+public OnVoteFriendlyFire(id, check, argc, const arg1[], const arg2[]) {
+	if (argc != 0) {
+	}
+	if (!check) {
+		set_pcvar_string(gCvarFriendlyFire, arg2);
+	}
+}
+
+public OnVoteAgAbort(id, check, argc) {
+	if (argc != 0) {
+		client_print(id, print_console, "%l", "INVALID_VOTE");
+		return PLUGIN_HANDLED;
+	}
+
+	if (!check)
+		AbortVersus();
+	
+	return PLUGIN_CONTINUE;
+}
+
+public OnVoteAgStart(id, check, argc) {
+	if (argc != 0) {
+		client_print(id, print_console, "%l", "INVALID_VOTE");
+		return false;
+	}
+
+	if (!check)
+		StartVersus();
+	
+	return true;
+}
+
+public OnVoteAgMap(id, check, argc, const arg1[], const arg2[]) {
+	if (argc != 1) {
+		client_print(id, print_console, "%l", "INVALID_VOTE");
+		return false;
+	}
+
+	if (check) {
+		if (!is_map_valid(arg2)) {
+			client_print(id, print_console, "%l", "INVALID_MAP");
+			return false;
+		}
+	} else {
+		ChangeMap(arg2);
+	}
+
+	return true;
+}
+
+public OnVoteAgNextMode(id, check, argc, const arg1[], const arg2[]) {
+	if (argc != 1) {
+		client_print(id, print_console, "%l", "INVALID_VOTE");
+		return false;
+	}
+
+	if (!check) {
+		ChangeMode(arg2);
+	}
+
+	return true;
+}
+
+/*public OnVoteAgAllow(id, check, argc, const arg[]) {
+	if (argc == 0) {
+		client_print(id, print_console, "%l", "INVALID_VOTE");
+		return false;
+	}
+
+	if (check) {
+		if (!is_map_valid(arg)) {
+			client_print(id, print_console, "%l", "INVALID_MAP");
+			return false;
+		}
+	} else {
+		ChangeMap(arg);
+	}
+
+	return true;
+}*/
 
 // Get user vote option from string
 // Returns vote option on success, -1 if vote is not valid.
@@ -2438,4 +2558,43 @@ stock player_teleport_splash(id) {
 	message_end();
 
 	return 1;
+}
+
+public native_ag_vote_add(plugin_id, argc) {
+	if (argc < 2)
+		return false;
+	new voteName[32]; get_string(1, voteName, charsmax(voteName));
+	new funcName[64]; get_string(2, funcName, charsmax(funcName)); // the callback function
+
+	new fwHandle = CreateMultiForward(funcName, ET_STOP, FP_CELL, FP_CELL, FP_CELL, FP_STRING, FP_STRING);
+	TrieSetCell(gTrieVoteList, voteName, fwHandle);
+
+	return true;
+}
+
+public native_ag_vote_remove(plugin_id, argc) {
+	if (argc < 1)
+		return false;
+	new voteName[32]; get_string(1, voteName, charsmax(voteName));
+	if (TrieKeyExists(gTrieVoteList, voteName)) {
+		new handle;
+		TrieGetCell(gTrieVoteList, voteName, handle);
+		TrieDeleteKey(gTrieVoteList, voteName);
+		DestroyForward(handle);
+		return true;
+	}
+
+	return false;
+}
+
+public native_ag_vote_exists(plugin_id, argc) {
+	if (argc < 1)
+		return false;
+
+	new voteName[32]; get_string(1, voteName, charsmax(voteName));
+
+	if (TrieKeyExists(gTrieVoteList, voteName))
+		return true;
+
+	return false;
 }
