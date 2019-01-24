@@ -86,7 +86,7 @@ new gLocationName[128][32]; 		// Max locations (128) and max location name lengt
 new Float:gLocationOrigin[128][3]; 	// Max locations and origin (x, y, z)
 new gNumLocations;
 
-#define MAXVALUE_TIMELIMIT 538214400
+#define MAX_TIMELIMIT 538214400 // used to supercede (hack) timelimit and use my own
 #define TIMELEFT_SETUNLIMITED -1
 
 // timeleft / timelimit system
@@ -138,64 +138,12 @@ new bool:gIsPause;
 
 new gGameModeList[32][32];
 new gGameModeName[32];
-new gGameModeListNum;
 
 // restore score system: array index
 #define SCORE_FRAGS 0
 #define SCORE_DEATHS 1
 
 new Trie:gTrieScoreAuthId; // handle where it saves all the authids of players playing a versus for rescore system...
-
-enum _:VoteValid {
-	VOTE_INVALID = -1,
-	VOTE_INVALID_MAP,
-	VOTE_INVALID_MODE,
-	VOTE_INVALID_NUMBER,
-	VOTE_VALID
-}
-
-// gVoteList has to be in the same order...
-enum _:VoteList {
-	VOTE_AGABORT,
-	VOTE_AGALLOW,
-	VOTE_AGNEXTMAP,
-	VOTE_AGNEXTMODE,
-	VOTE_AGPAUSE,
-	VOTE_AGSTART,
-	VOTE_MAP,
-	VOTE_MP_BUNNYHOP,
-	VOTE_MP_FALLDAMAGE,
-	VOTE_MP_FLASHLIGHT,
-	VOTE_MP_FOOTSTEPS,
-	VOTE_MP_FORCERESPAWN,
-	VOTE_MP_FRAGLIMIT,
-	VOTE_MP_FRIENDLYFIRE,
-	VOTE_MP_SELFGAUSS,
-	VOTE_MP_TIMELIMIT,
-	VOTE_MP_WEAPONSTAY,
-	VOTE_MODE // always MODE has to be at the end
-}
-
-// this is used for check if user's vote is valid
-new const gVoteList[][] = {
-	"agabort",
-	"agallow",
-	"agnextmap",
-	"agnextmode",
-	"agpause",
-	"agstart",
-	"map",
-	"mp_bunnyhop",
-	"mp_falldamage",
-	"mp_flashlight",
-	"mp_footsteps",
-	"mp_forcerespawn",
-	"mp_fraglimit",
-	"mp_friendlyfire",
-	"mp_selfgauss",
-	"mp_timelimit",
-	"mp_weaponstay",
-};
 
 #define VOTE_YES 1
 #define VOTE_NO -1
@@ -207,7 +155,6 @@ new Float:gVoteFailedTime; // in seconds
 new gVotePlayers[33]; // 1: vote yes; 0: didn't vote; -1; vote no; 
 new gVoteCallerName[MAX_NAME_LENGTH];
 new gVoteCallerUserId;
-new gVoteTargetUserId;
 new gVoteArg1[32];
 new gVoteArg2[32];
 new gVoteOptionFwHandle;
@@ -1069,13 +1016,13 @@ public StartTimeLeft() {
 	// from now, i'm going to use my own timeleft and timelimit
 	gTimeLimit = get_pcvar_num(gCvarTimeLimit);
 
-	if (gTimeLimit >= MAXVALUE_TIMELIMIT)
+	if (gTimeLimit >= MAX_TIMELIMIT)
 		gTimeLimit = 0;
 
 	gTimeLeft = gTimeLimit > 0 ? gTimeLimit * 60 : TIMELEFT_SETUNLIMITED;
 
 	// set mp_timelimit to "unlimited" and block changes so no one mess the timelimit
-	set_pcvar_num(gCvarTimeLimit, MAXVALUE_TIMELIMIT);
+	set_pcvar_num(gCvarTimeLimit, MAX_TIMELIMIT);
 	gHookCvarTimeLimit = hook_cvar_change(gCvarTimeLimit, "CvarTimeLimitHook");
 
 	// Start my own timeleft
@@ -1141,7 +1088,7 @@ public CvarTimeLimitHook(pcvar, const old_value[], const new_value[]) {
 	}
 
 	// always set it to unlimited, so players can't change the cvar value and finish the map (go to intermission mode) by accident...	
-	set_pcvar_num(pcvar, MAXVALUE_TIMELIMIT);
+	set_pcvar_num(pcvar, MAX_TIMELIMIT);
 
 	enable_cvar_hook(gHookCvarTimeLimit);
 }
@@ -1793,6 +1740,7 @@ CreateVoteSystem() {
 	ag_vote_add("agnextmode", "OnVoteNextMode");
 	ag_vote_add("agpause", "OnVoteAgPause");
 	ag_vote_add("agstart", "OnVoteAgStart");
+	ag_vote_add("agmap", "OnVoteAgMap");
 	ag_vote_add("map", "OnVoteAgMap");
 	ag_vote_add("mp_bunnyhop", "OnVoteBunnyHop");
 	ag_vote_add("mp_falldamage", "OnVoteFallDamage");
@@ -1804,10 +1752,6 @@ CreateVoteSystem() {
 	ag_vote_add("mp_selfgauss", "OnVoteSelfGauss");
 	ag_vote_add("mp_timelimit", "OnVoteTimeLimit");
 	ag_vote_add("mp_weaponstay", "OnVoteWeaponStay");
-
-	ag_vote_add("ag_oldphysics", "OnVoteBunnyHop");
-	ag_vote_add("agmap", "OnVoteAgMap");
-	ag_vote_add("ag_gauss_fix", "OnVoteSelfGauss");
 }
 
 LoadGameMode() {
@@ -1841,9 +1785,9 @@ LoadGameMode() {
 			if (equal(mode, fileName))
 				gGameModeName = name;
 
-			register_concmd(fileName, "CmdChangeMode", ADMIN_BAN, fmt("- %s", info)); // add cmd for gamemode
-			gGameModeList[gGameModeListNum++] = fileName;
-			TrieSetCell(gTrieVoteList, fileName, VOTE_MODE); // add gamemode to vote list
+			// create cmd and vote for gamemode
+			register_concmd(fileName, "CmdChangeMode", ADMIN_BAN, fmt("- %s", info));
+			ag_vote_add(fileName, "OnVoteChangeMode"); 
 		}
 	} while (next_file(handleDir, fileName, charsmax(fileName)));
 
@@ -1908,9 +1852,9 @@ public CmdVote(id) {
 	}
 	
 	new voteResult;
-	ExecuteForward(gVoteOptionFwHandle, voteResult, gVoteCallerUserId, true, gNumVoteArgs, arg1, arg2);
+	ExecuteForward(gVoteOptionFwHandle, voteResult, id, true, gNumVoteArgs, arg1, arg2);
 
-	if (voteResult == PLUGIN_HANDLED)
+	if (!voteResult)
 		return PLUGIN_HANDLED;
 
 	gVoteArg1 = arg1;
@@ -1928,8 +1872,7 @@ public CmdVote(id) {
 	// show vote
 	ShowVote();
 
-
-	return PLUGIN_CONTINUE;
+	return PLUGIN_HANDLED;
 }
 
 public ShowVote() {
@@ -1973,33 +1916,12 @@ public DoVote() {
 	RemoveVote();
 
 	new caller = find_player_ex(FindPlayer_MatchUserId, gVoteCallerUserId);
-	new target = find_player_ex(FindPlayer_MatchUserId, gVoteTargetUserId);
-	
-	// if it's not connected vote caller, cancel it...
+
+	// if caller has leaved the game, then don't do anything...
 	if (!caller)
 		return;
 
-	ExecuteForward(gVoteOptionFwHandle, _, gVoteCallerUserId, false, gNumVoteArgs, gVoteArg1, gVoteArg2);
-	/*switch (gVoteOption) {
-		case VOTE_AGABORT: 			AbortVersus();
-		case VOTE_AGALLOW: 			AllowPlayer(target);
-		case VOTE_AGNEXTMAP:		set_pcvar_string(gCvarAmxNextMap, gVoteArg2);
-		case VOTE_AGNEXTMODE:		set_pcvar_string(gCvarGameMode, gVoteArg2);
-		case VOTE_AGPAUSE: 			PauseGame(caller);
-		case VOTE_AGSTART: 			StartVersus();
-		case VOTE_MAP: 				ChangeMap(gVoteArg2);
-		case VOTE_MODE: 			ChangeMode(gVoteArg1);
-		case VOTE_MP_BUNNYHOP: 		set_pcvar_string(gCvarBunnyHop, gVoteArg2);
-		case VOTE_MP_FALLDAMAGE:	set_pcvar_string(gCvarFallDamage, gVoteArg2);
-		case VOTE_MP_FLASHLIGHT:	set_pcvar_string(gCvarFlashLight, gVoteArg2);
-		case VOTE_MP_FOOTSTEPS:		set_pcvar_string(gCvarFootSteps, gVoteArg2);
-		case VOTE_MP_FORCERESPAWN: 	set_pcvar_string(gCvarForceRespawn, gVoteArg2);
-		case VOTE_MP_FRIENDLYFIRE:	set_pcvar_string(gCvarFriendlyFire, gVoteArg2);
-		case VOTE_MP_SELFGAUSS:		set_pcvar_string(gCvarSelfGauss, gVoteArg2);
-		case VOTE_MP_TIMELIMIT:		set_pcvar_string(gCvarTimeLimit, gVoteArg2);
-		case VOTE_MP_FRAGLIMIT: 	set_pcvar_string(gCvarFragLimit, gVoteArg2);
-		case VOTE_MP_WEAPONSTAY:	set_pcvar_string(gCvarWeaponStay, gVoteArg2);
-	}*/
+	ExecuteForward(gVoteOptionFwHandle, _, caller, false, gNumVoteArgs, gVoteArg1, gVoteArg2);
 }
 
 public DenyVote() {
@@ -2030,29 +1952,206 @@ public RemoveVote() {
 	arrayset(gVotePlayers, 0, sizeof gVotePlayers);
 }
 
-public OnVoteFriendlyFire(id, check, argc, const arg1[], const arg2[]) {
-	if (argc != 0) {
+public OnVoteTimeLimit(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
 	}
+	
+	if (!check) {
+		set_pcvar_string(gCvarTimeLimit, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+		new num = str_to_num(arg2);
+		if (num < 0 && num >= MAX_TIMELIMIT) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+public OnVoteFriendlyFire(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
+	}
+	
 	if (!check) {
 		set_pcvar_string(gCvarFriendlyFire, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
 	}
+
+	return true;
+}
+
+public OnVoteBunnyHop(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
+	}
+	
+	if (!check) {
+		set_pcvar_string(gCvarBunnyHop, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+public OnVoteFallDamage(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
+	}
+
+	if (!check) {
+		set_pcvar_string(gCvarFallDamage, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+public OnVoteFlashLight(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
+	}
+
+	if (!check) {
+		set_pcvar_string(gCvarFlashLight, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+public OnVoteFootSteps(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
+	}
+
+	if (!check) {
+		set_pcvar_string(gCvarFootSteps, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+public OnVoteFragLimit(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
+	}
+
+	if (!check) {
+		set_pcvar_string(gCvarFragLimit, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+public OnVoteSelfGauss(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
+	}
+
+	if (!check) {
+		set_pcvar_string(gCvarSelfGauss, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+public OnVoteForceRespawn(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
+	}
+
+	if (!check) {
+		set_pcvar_string(gCvarForceRespawn, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+public OnVoteWeaponStay(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		console_print(id, "%l", "VOTE_INVALID");
+		return false;
+	}
+
+	if (!check) {
+		set_pcvar_string(gCvarWeaponStay, arg2);
+	} else {
+		if (!is_str_num(arg2)) {
+			console_print(id, "%l", "INVALID_NUMBER");
+			return false;
+		}
+	}
+
+	return true;
 }
 
 public OnVoteAgAbort(id, check, argc) {
-	if (argc != 0) {
-		client_print(id, print_console, "%l", "INVALID_VOTE");
-		return PLUGIN_HANDLED;
+	if (argc != 1) {
+		client_print(id, print_console, "%l", "VOTE_INVALID");
+		return false;
 	}
 
 	if (!check)
 		AbortVersus();
 	
-	return PLUGIN_CONTINUE;
+	return true;
 }
 
 public OnVoteAgStart(id, check, argc) {
-	if (argc != 0) {
-		client_print(id, print_console, "%l", "INVALID_VOTE");
+	if (argc != 1) {
+		client_print(id, print_console, "%l", "VOTE_INVALID");
 		return false;
 	}
 
@@ -2062,27 +2161,27 @@ public OnVoteAgStart(id, check, argc) {
 	return true;
 }
 
-public OnVoteAgMap(id, check, argc, const arg1[], const arg2[]) {
-	if (argc != 1) {
-		client_print(id, print_console, "%l", "INVALID_VOTE");
+public OnVoteAgMap(id, check, argc, arg1[], arg2[]) {
+	if (argc != 2) {
+		client_print(id, print_console, "%l", "VOTE_INVALID");
 		return false;
 	}
 
-	if (check) {
+	if (!check) {
+		ChangeMap(arg2);
+	} else {
 		if (!is_map_valid(arg2)) {
 			client_print(id, print_console, "%l", "INVALID_MAP");
 			return false;
 		}
-	} else {
-		ChangeMap(arg2);
 	}
 
 	return true;
 }
 
-public OnVoteAgNextMode(id, check, argc, const arg1[], const arg2[]) {
+public OnVoteAgNextMode(id, check, argc, arg1[], arg2[]) {
 	if (argc != 1) {
-		client_print(id, print_console, "%l", "INVALID_VOTE");
+		client_print(id, print_console, "%l", "VOTE_INVALID");
 		return false;
 	}
 
@@ -2093,71 +2192,49 @@ public OnVoteAgNextMode(id, check, argc, const arg1[], const arg2[]) {
 	return true;
 }
 
-/*public OnVoteAgAllow(id, check, argc, const arg[]) {
-	if (argc == 0) {
-		client_print(id, print_console, "%l", "INVALID_VOTE");
+public OnVoteAgAllow(id, check, argc, arg1[], arg2[]) {
+	if (argc > 2) {
+		client_print(id, print_console, "%l", "VOTE_INVALID");
 		return false;
 	}
 
-	if (check) {
-		if (!is_map_valid(arg)) {
-			client_print(id, print_console, "%l", "INVALID_MAP");
+	static userid;
+	if (!check) {
+		AllowPlayer(find_player_ex(FindPlayer_MatchUserId, userid));
+	} else {
+		new player;
+		if (equal(arg2, "")) { // allow yourself
+			get_user_name(id, arg2, 31);
+			userid = get_user_userid(id);
+		} else if ((player = cmd_target(id, arg2, CMDTARGET_ALLOW_SELF))) {
+			get_user_name(player, arg2, 31);
+			userid = get_user_userid(player);
+		} else {
 			return false;
 		}
-	} else {
-		ChangeMap(arg);
 	}
 
 	return true;
-}*/
+}
 
-// Get user vote option from string
-// Returns vote option on success, -1 if vote is not valid.
-GetUserVote(id, arg1[], arg2[], len) {
-	new player, vote = VOTE_INVALID;
-	new valid = TrieGetCell(gTrieVoteList, arg1, vote) ? VOTE_VALID : VOTE_INVALID;
-
-	switch (vote) {
-		case VOTE_MAP, VOTE_AGNEXTMAP: 
-			valid = is_map_valid(arg2) ? VOTE_VALID : VOTE_INVALID_MAP;
-		case VOTE_AGNEXTMODE:
-			valid = TrieKeyExists(gTrieVoteList, arg2) ? VOTE_VALID : VOTE_INVALID_MODE;
-		case VOTE_MP_TIMELIMIT, VOTE_MP_FRIENDLYFIRE, VOTE_MP_SELFGAUSS, VOTE_MP_FALLDAMAGE, VOTE_MP_BUNNYHOP, 
-				VOTE_MP_FRAGLIMIT, VOTE_MP_WEAPONSTAY, VOTE_MP_FORCERESPAWN, VOTE_MP_FOOTSTEPS, VOTE_MP_FLASHLIGHT:
-			valid = is_str_num(arg2) ? VOTE_VALID : VOTE_INVALID_NUMBER;
-		case VOTE_AGALLOW:
-			if (equal(arg2, "")) { // allow yourself
-				get_user_name(id, arg2, len);
-				gVoteTargetUserId = get_user_userid(id);
-			} else if ((player = cmd_target(id, arg2, CMDTARGET_ALLOW_SELF))) {
-				get_user_name(player, arg2, len);
-				gVoteTargetUserId = get_user_userid(player);
-			} else
-				return VOTE_INVALID; // cmd_target shows his own error message.
-	}
-
-	new mlKey[32];
-
-	switch (valid) {
-		case VOTE_INVALID: 			mlKey = "VOTE_INVALID";
-		case VOTE_INVALID_MAP: 		mlKey = "INVALID_MAP";
-		case VOTE_INVALID_MODE: 	mlKey = "INVALID_MODE";
-		case VOTE_INVALID_NUMBER: 	mlKey = "INVALID_NUMBER";
-	}
-	
-	if (valid != VOTE_VALID)
-		client_print(id, print_console, "%l", mlKey);
-
-	return valid == VOTE_VALID ? vote : VOTE_INVALID;
+public OnVoteChangeMode(id, check, argc, arg1[]) {
+	if (!check)
+		ChangeMode(arg1);
+	return true;
 }
 
 VoteHelp(id) {
-	new i, j;
-	client_print(id, print_console, "%l", "VOTE_HELP");
-	for (i = 0; i < gGameModeListNum; i++)
-		client_print(id, print_console, "%i. %s", ++j, gGameModeList[i]);
-	for (i = 0; i < sizeof gVoteList; i++)
-		client_print(id, print_console, "%i. %s", ++j, gVoteList[i]);
+	new TrieIter:handle = TrieIterCreate(gTrieVoteList);
+	
+	console_print(id, "--- %l ---", "VOTE_HELP");
+	new key[32], i;
+	while (!TrieIterEnded(handle)) {
+	    TrieIterGetKey(handle, key, charsmax(key));
+	    console_print(id, "%d. %s", ++i, key);
+	    TrieIterNext(handle);
+	}
+	console_print(id, "--- %l ---", "VOTE_HELP");
+	TrieIterDestroy(handle);
 }
 
 public ChangeMode(const mode[]) {
@@ -2563,10 +2640,15 @@ stock player_teleport_splash(id) {
 public native_ag_vote_add(plugin_id, argc) {
 	if (argc < 2)
 		return false;
+
 	new voteName[32]; get_string(1, voteName, charsmax(voteName));
 	new funcName[64]; get_string(2, funcName, charsmax(funcName)); // the callback function
 
 	new fwHandle = CreateMultiForward(funcName, ET_STOP, FP_CELL, FP_CELL, FP_CELL, FP_STRING, FP_STRING);
+
+	if (fwHandle == -1)
+		return false;
+
 	TrieSetCell(gTrieVoteList, voteName, fwHandle);
 
 	return true;
@@ -2575,7 +2657,9 @@ public native_ag_vote_add(plugin_id, argc) {
 public native_ag_vote_remove(plugin_id, argc) {
 	if (argc < 1)
 		return false;
+
 	new voteName[32]; get_string(1, voteName, charsmax(voteName));
+
 	if (TrieKeyExists(gTrieVoteList, voteName)) {
 		new handle;
 		TrieGetCell(gTrieVoteList, voteName, handle);
