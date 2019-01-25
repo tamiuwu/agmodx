@@ -1852,7 +1852,7 @@ public CmdVote(id) {
 	}
 	
 	new voteResult;
-	ExecuteForward(gVoteOptionFwHandle, voteResult, id, true, gNumVoteArgs, arg1, arg2);
+	ExecuteForward(gVoteOptionFwHandle, voteResult, id, true, gNumVoteArgs, PrepareArray(arg1, sizeof(arg1), true), PrepareArray(arg2, sizeof(arg2), true));
 
 	if (!voteResult)
 		return PLUGIN_HANDLED;
@@ -2204,7 +2204,6 @@ public OnVoteAgAllow(id, check, argc, arg1[], arg2[]) {
 	} else {
 		new player;
 		if (equal(arg2, "")) { // allow yourself
-			get_user_name(id, arg2, 31);
 			userid = get_user_userid(id);
 		} else if ((player = cmd_target(id, arg2, CMDTARGET_ALLOW_SELF))) {
 			get_user_name(player, arg2, 31);
@@ -2644,7 +2643,7 @@ public native_ag_vote_add(plugin_id, argc) {
 	new voteName[32]; get_string(1, voteName, charsmax(voteName));
 	new funcName[64]; get_string(2, funcName, charsmax(funcName)); // the callback function
 
-	new fwHandle = CreateMultiForward(funcName, ET_STOP, FP_CELL, FP_CELL, FP_CELL, FP_STRING, FP_STRING);
+	new fwHandle = CreateMultiForward(funcName, ET_STOP, FP_CELL, FP_CELL, FP_CELL, FP_ARRAY, FP_ARRAY);
 
 	if (fwHandle == -1)
 		return false;
